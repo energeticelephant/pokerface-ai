@@ -729,72 +729,72 @@ export class AgentRuntime implements IAgentRuntime {
         state?: State,
         callback?: HandlerCallback
     ): Promise<void> {
+        elizaLogger.debug(`Processing ${responses.length} responses`);
+
         for (const response of responses) {
-            if (!response.content?.action) {
-                elizaLogger.warn("No action found in the response content.");
-                continue;
-            }
-
-            const normalizedAction = response.content.action
-                .toLowerCase()
-                .replace("_", "");
-
-            elizaLogger.success(`Normalized action: ${normalizedAction}`);
-
-            let action = this.actions.find(
-                (a: { name: string }) =>
-                    a.name
-                        .toLowerCase()
-                        .replace("_", "")
-                        .includes(normalizedAction) ||
-                    normalizedAction.includes(
-                        a.name.toLowerCase().replace("_", "")
-                    )
-            );
-
-            if (!action) {
-                elizaLogger.info("Attempting to find action in similes.");
-                for (const _action of this.actions) {
-                    const simileAction = _action.similes.find(
-                        (simile) =>
-                            simile
-                                .toLowerCase()
-                                .replace("_", "")
-                                .includes(normalizedAction) ||
-                            normalizedAction.includes(
-                                simile.toLowerCase().replace("_", "")
-                            )
-                    );
-                    if (simileAction) {
-                        action = _action;
-                        elizaLogger.success(
-                            `Action found in similes: ${action.name}`
-                        );
-                        break;
-                    }
-                }
-            }
-
-            if (!action) {
-                elizaLogger.error(
-                    "No action found for",
-                    response.content.action
-                );
-                continue;
-            }
-
-            if (!action.handler) {
-                elizaLogger.error(`Action ${action.name} has no handler.`);
-                continue;
-            }
-
             try {
-                elizaLogger.info(
-                    `Executing handler for action: ${action.name}`
+                if (!response.content?.action) {
+                    elizaLogger.warn(
+                        "No action found in the response content."
+                    );
+                    continue;
+                }
+
+                const normalizedAction = response.content.action
+                    .toLowerCase()
+                    .replace("_", "");
+
+                elizaLogger.debug(
+                    `Looking for action handler: ${response.content.action}`
                 );
-                await action.handler(this, message, state, {}, callback);
+                elizaLogger.debug(
+                    `Normalized action name: ${normalizedAction}`
+                );
+
+                const action = this.actions.find(
+                    (a: { name: string }) =>
+                        a.name
+                            .toLowerCase()
+                            .replace("_", "")
+                            .includes(normalizedAction) ||
+                        normalizedAction.includes(
+                            a.name.toLowerCase().replace("_", "")
+                        )
+                );
+
+                if (!action) {
+                    elizaLogger.error(
+                        `No handler found for action: ${response.content.action}`
+                    );
+                    continue;
+                }
+
+                elizaLogger.debug(`Found action handler: ${action.name}`);
+
+                if (!action.handler) {
+                    elizaLogger.error(`Action ${action.name} has no handler.`);
+                    continue;
+                }
+
+                try {
+                    elizaLogger.info(
+                        `Executing handler for action: ${action.name}`
+                    );
+                    await action.handler(this, message, state, {}, callback);
+                } catch (error) {
+                    elizaLogger.error(
+                        `Error executing handler for ${action.name}:`,
+                        error
+                    );
+                    throw error;
+                }
             } catch (error) {
-                elizaLogger.error(error);
+                elizaLogger.error(
+                    `Error processing action for response:`,
+                    error
+                );
+                // Continue processing other responses even if one fails
+                continue;
             }
         }
     }

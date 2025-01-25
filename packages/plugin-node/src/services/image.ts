@@ -23,6 +23,7 @@ import fs from "fs";
 import gifFrames from "gif-frames";
 import os from "os";
 import path from "path";
+import { Character } from "@elizaos/core";
 
 const IMAGE_DESCRIPTION_PROMPT =
     "Describe this image and give it a title. The first line should be the title, and then a line break, then a detailed description of the image. Respond with the format 'title\\ndescription'";
@@ -32,6 +33,10 @@ interface ImageProvider {
     describeImage(
         imageData: Buffer,
         mimeType: string
+    ): Promise<{ title: string; description: string }>;
+    analyzePokerSituation(
+        description: string,
+        character?: Character
     ): Promise<{ title: string; description: string }>;
 }
 
@@ -144,6 +149,32 @@ class LocalImageProvider implements ImageProvider {
         const detailedCaption = result["<DETAILED_CAPTION>"] as string;
         return { title: detailedCaption, description: detailedCaption };
     }
+
+    async analyzePokerSituation(
+        description: string,
+        _character?: Character
+    ): Promise<{ title: string; description: string }> {
+        if (!this.model || !this.tokenizer) {
+            throw new Error("Model components not initialized");
+        }
+
+        const prompt = `Analyze this poker situation and provide strategic advice: ${description}`;
+        const textInputs = this.tokenizer(prompt);
+
+        const generatedIds = await this.model.generate({
+            ...textInputs,
+            max_new_tokens: 256,
+        });
+
+        const analysis = this.tokenizer.batch_decode(generatedIds as Tensor, {
+            skip_special_tokens: true,
+        })[0];
+
+        return {
+            title: "Poker Analysis",
+            description: analysis,
+        };
+    }
 }
 
 class OpenAIImageProvider implements ImageProvider {
@@ -187,6 +218,99 @@ class OpenAIImageProvider implements ImageProvider {
         const data = await response.json();
         return parseImageResponse(data.choices[0].message.content);
     }
+
+    async analyzePokerSituation(
+        description: string,
+        character = this.runtime.character
+    ): Promise<{ title: string; description: string }> {
+        const characterPrompt = `You are ${character?.name}, a poker strategy advisor.
+    Bio:
+    ${Array.isArray(character?.bio) ? character?.bio?.join("\n") : character?.bio}
+
+    Lore & Background:
+    ${Array.isArray(character?.lore) ? character?.lore?.join("\n") : character?.lore}
+
+    Knowledge & Expertise:
+    ${
+        Array.isArray(character?.knowledge)
+            ? character?.knowledge?.join("\n")
+            : character?.knowledge
+    }
+
+    Post Examples:
+    ${
+        Array.isArray(character?.postExamples)
+            ? character?.postExamples?.join("\n")
+            : character?.postExamples
+    }
+
+    Topics of Expertise:
+    ${
+        Array.isArray(character?.topics)
+            ? character?.topics?.join(", ")
+            : character?.topics
+    }
+
+    Style Guidelines:
+    ${
+        Array.isArray(character?.style?.all)
+            ? character?.style?.all?.join("\n")
+            : character?.style?.all
+    }
+    ${
+        Array.isArray(character?.style?.chat)
+            ? character?.style?.chat?.join("\n")
+            : character?.style?.chat
+    }
+
+    Personality Traits:
+    ${
+        Array.isArray(character?.adjectives)
+            ? character?.adjectives?.join(", ")
+            : character?.adjectives
+    }
+
+    Analyze the following poker situation in your unique style, maintaining your personality and expertise.
+
+    ${character?.templates?.messageHandlerTemplate}
+
+    ${character?.templates?.twitterPostTemplate}
+
+    ${character?.templates?.twitterShouldRespondTemplate}
+    `;
+
+        elizaLogger.debug("Character prompt:", characterPrompt);
+        const endpoint = getEndpoint(ModelProviderName.OPENAI);
+
+        const response = await fetch(endpoint + "/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${this.runtime.getSetting("OPENAI_API_KEY")}`,
+            },
+            body: JSON.stringify({
+                model: "gpt-4",
+                messages: [
+                    {
+                        role: "system",
+                        content: characterPrompt,
+                    },
+                    {
+                        role: "user",
+                        content: `Analyze this poker situation and provide strategic advice: ${description}`,
+                    },
+                ],
+                max_tokens: 500,
+            }),
+        });
+
+        if (!response.ok) {
+            await handleApiError(response, "OpenAI");
+        }
+
+        const data = await response.json();
+        return parseImageResponse(data.choices[0].message.content);
+    }
 }
 
 class GoogleImageProvider implements ImageProvider {
@@ -218,6 +342,42 @@ class GoogleImageProvider implements ImageProvider {
                                         mime_type: mimeType,
                                         data: imageData.toString("base64"),
                                     },
+                                },
+                            ],
+                        },
+                    ],
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            await handleApiError(response, "Google Gemini");
+        }
+
+        const data = await response.json();
+        return parseImageResponse(data.candidates[0].content.parts[0].text);
+    }
+
+    async analyzePokerSituation(
+        description: string,
+        _character?: Character
+    ): Promise<{ title: string; description: string }> {
+        const endpoint = getEndpoint(ModelProviderName.GOOGLE);
+        const apiKey = this.runtime.getSetting("GOOGLE_GENERATIVE_AI_API_KEY");
+
+        const response = await fetch(
+            `${endpoint}/v1/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            parts: [
+                                {
+                                    text: `Analyze this poker situation and provide strategic advice: ${description}`,
                                 },
                             ],
                         },
@@ -306,7 +466,7 @@ export class ImageDescriptionService
         const isGif = imageUrl.toLowerCase().endsWith(".gif");
         let imageData: Buffer;
         let mimeType: string;
-
+        elizaLogger.debug(`Loading image data from: ${imageUrl}`);
         if (isGif) {
             const { filePath } = await this.extractFirstFrameFromGif(imageUrl);
             imageData = fs.readFileSync(filePath);
@@ -366,8 +526,23 @@ export class ImageDescriptionService
         }
 
         try {
+            elizaLogger.log("Loading image data", imageUrl);
             const { data, mimeType } = await this.loadImageData(imageUrl);
-            return await this.provider!.describeImage(data, mimeType);
+            elizaLogger.log("Describing image");
+            const descriptionResult = await this.provider!.describeImage(
+                data,
+                mimeType
+            );
+            elizaLogger.log("Image description result:", descriptionResult);
+
+            // Now analyze the poker situation using the description
+            const analysisResult = await this.provider!.analyzePokerSituation(
+                descriptionResult.description,
+                this.runtime?.character
+            );
+            elizaLogger.log("Poker analysis result:", analysisResult);
+
+            return analysisResult;
         } catch (error) {
             elizaLogger.error("Error in describeImage:", error);
             throw error;

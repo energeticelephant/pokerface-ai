@@ -3,6 +3,7 @@ export * from "./services/index.ts";
 import { Plugin } from "@elizaos/core";
 
 import { describeImage } from "./actions/describe-image.ts";
+import { analyzePokerSituation } from "./actions/analyze-poker-situation.ts";
 import {
     AwsS3Service,
     BrowserService,
@@ -30,6 +31,6 @@ export function createNodePlugin() {
             new VideoService(),
             new AwsS3Service(),
         ],
-        actions: [describeImage],
+        actions: [describeImage, analyzePokerSituation],
     } as const satisfies Plugin;
 }
