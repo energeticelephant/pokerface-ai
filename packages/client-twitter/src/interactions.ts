@@ -15,7 +15,7 @@ import {
     elizaLogger,
     getEmbeddingZeroVector,
     IImageDescriptionService,
-    ServiceType
+    ServiceType,
 } from "@elizaos/core";
 import { ClientBase } from "./base";
 import { buildConversationThread, sendTweet, wait } from "./utils.ts";
@@ -63,19 +63,28 @@ Here is the descriptions of images in the Current post.
 
 export const twitterShouldRespondTemplate = (targetUsersStr: string) =>
     `# INSTRUCTIONS: Determine if {{agentName}} (@{{twitterUserName}}) should respond to the message and participate in the conversation. Do not comment. Just respond with "true" or "false".
-
 Response options are RESPOND, IGNORE and STOP.
 
 PRIORITY RULE: ALWAYS RESPOND to these users regardless of topic or message content: ${targetUsersStr}. Topic relevance should be ignored for these users.
 
 For other users:
-- {{agentName}} should RESPOND to messages directed at them
-- {{agentName}} should RESPOND to conversations relevant to their background
-- {{agentName}} should IGNORE irrelevant messages
+- {{agentName}} should RESPOND to messages directed at them with poker-themed responses:
+  * For non-poker topics, respond with a poker meme or analogy
+  * Turn any topic into a poker reference or joke
+  * Use poker terms to roast or comment on non-poker content
+- {{agentName}} should RESPOND to any poker hand images or strategy questions seriously
+- {{agentName}} should RESPOND to bad beat stories with empathy and humor
+- {{agentName}} should RESPOND to poker tournament/cash game discussions with expertise
+- {{agentName}} should IGNORE spam or inappropriate content
 - {{agentName}} should IGNORE very short messages unless directly addressed
 - {{agentName}} should STOP if asked to stop
 - {{agentName}} should STOP if conversation is concluded
 - {{agentName}} is in a room with other users and wants to be conversational, but not annoying.
+
+EXAMPLES:
+- If someone talks about their day → "Sounds like you're running better than pocket Kings against Aces!"
+- If someone complains about work → "At least you're not grinding microstakes with 72o!"
+- Random non-poker topics → "That's as random as a 3-7 suited all-in preflop!"
 
 IMPORTANT:
 - {{agentName}} (aka @{{twitterUserName}}) is particularly sensitive about being annoying, so if there is any doubt, it is better to IGNORE than to RESPOND.
@@ -349,8 +358,8 @@ export class TwitterInteractionClient {
         elizaLogger.debug("formattedConversation: ", formattedConversation);
 
         const imageDescriptionsArray = [];
-        try{
-            elizaLogger.debug('Getting images');
+        try {
+            elizaLogger.debug("Getting images");
             for (const photo of tweet.photos) {
                 elizaLogger.debug(photo.url);
                 const description = await this.runtime
@@ -361,21 +370,24 @@ export class TwitterInteractionClient {
                 imageDescriptionsArray.push(description);
             }
         } catch (error) {
-    // Handle the error
-    elizaLogger.error("Error Occured during describing image: ", error);
-}
-
-
-
+            // Handle the error
+            elizaLogger.error("Error Occured during describing image: ", error);
+        }
 
         let state = await this.runtime.composeState(message, {
             twitterClient: this.client.twitterClient,
             twitterUserName: this.client.twitterConfig.TWITTER_USERNAME,
             currentPost,
             formattedConversation,
-            imageDescriptions: imageDescriptionsArray.length > 0
-            ? `\nImages in Tweet:\n${imageDescriptionsArray.map((desc, i) =>
-              `Image ${i + 1}: Title: ${desc.title}\nDescription: ${desc.description}`).join("\n\n")}`:""
+            imageDescriptions:
+                imageDescriptionsArray.length > 0
+                    ? `\nImages in Tweet:\n${imageDescriptionsArray
+                          .map(
+                              (desc, i) =>
+                                  `Image ${i + 1}: Title: ${desc.title}\nDescription: ${desc.description}`
+                          )
+                          .join("\n\n")}`
+                    : "",
         });
 
         // check if the tweet exists, save if it doesn't
