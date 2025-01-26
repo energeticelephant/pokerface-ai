@@ -72,7 +72,7 @@ Contributions are welcome! Please read `CONTRIBUTING.md` for guidelines.
 
 ## 🔗 Links
 
-- Twitter: [Link](https://x.com/pokerface_ai)
+- Twitter: [Link](https://x.com/pokerfaceAI)
 - ElizaOS: [Link](https://github.com/elizaos/eliza)
 
 ## 🙏 Acknowledgments
