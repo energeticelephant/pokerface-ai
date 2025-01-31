@@ -857,6 +857,7 @@ export class AgentRuntime implements IAgentRuntime {
             modelClass: ModelClass.SMALL,
             verifiableInferenceAdapter: this.verifiableInferenceAdapter,
         });
+        elizaLogger.log("runtime.ts line 860: result:", result);
 
         const evaluators = parseJsonArrayFromText(
             result

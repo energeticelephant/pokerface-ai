@@ -370,33 +370,53 @@ export class ClientBase extends EventEmitter {
         searchMode: SearchMode,
         cursor?: string
     ): Promise<QueryTweetsResponse> {
+        elizaLogger.debug("Starting tweet search:", {
+            query,
+            maxTweets,
+            searchMode,
+            cursor,
+        });
+
         try {
             // Sometimes this fails because we are rate limited. in this case, we just need to return an empty array
             // if we dont get a response in 5 seconds, something is wrong
-            const timeoutPromise = new Promise((resolve) =>
-                setTimeout(() => resolve({ tweets: [] }), 15000)
-            );
+
+            const timeoutPromise = new Promise((resolve) => {
+                setTimeout(() => {
+                    elizaLogger.warn("Search timed out after 15s");
+                    resolve({ tweets: [] });
+                }, 15000);
+            });
 
             try {
-                const result = await this.requestQueue.add(
-                    async () =>
-                        await Promise.race([
-                            this.twitterClient.fetchSearchTweets(
+                elizaLogger.log("Adding to request queue...");
+                const result = await this.requestQueue.add(async () => {
+                    const raceResult = await Promise.race([
+                        this.twitterClient
+                            .fetchSearchTweets(
                                 query,
                                 maxTweets,
                                 searchMode,
                                 cursor
-                            ),
-                            timeoutPromise,
-                        ])
-                );
+                            )
+                            .then((r) => {
+                                elizaLogger.log("Search completed:", {
+                                    found: r?.tweets?.length,
+                                    hasMore: !!r?.next,
+                                });
+                                return r;
+                            }),
+                        timeoutPromise,
+                    ]);
+                    return raceResult;
+                });
                 return (result ?? { tweets: [] }) as QueryTweetsResponse;
             } catch (error) {
-                elizaLogger.error("Error fetching search tweets:", error);
+                elizaLogger.error("Twitter API error:", error);
                 return { tweets: [] };
             }
         } catch (error) {
-            elizaLogger.error("Error fetching search tweets:", error);
+            elizaLogger.error("Request queue error:", error);
             return { tweets: [] };
         }
     }
