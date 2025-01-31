@@ -26,7 +26,7 @@ import path from "path";
 import { Character } from "@elizaos/core";
 
 const IMAGE_DESCRIPTION_PROMPT =
-    "Describe this image and give it a title. The first line should be the title, and then a line break, then a detailed description of the image. Respond with the format 'title\\ndescription'";
+    "Describe this poker game in detail. What cards are visible? What is the board state? What are the stack sizes and positions? What stage of the hand is this (preflop/flop/turn/river)? What is the pot size? {input}";
 
 interface ImageProvider {
     initialize(): Promise<void>;
@@ -205,7 +205,7 @@ class OpenAIImageProvider implements ImageProvider {
                 Authorization: `Bearer ${this.runtime.getSetting("OPENAI_API_KEY")}`,
             },
             body: JSON.stringify({
-                model: "gpt-4o-mini",
+                model: "gpt-4o",
                 messages: [{ role: "user", content }],
                 max_tokens: 500,
             }),

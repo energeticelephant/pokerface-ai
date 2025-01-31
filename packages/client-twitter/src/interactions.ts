@@ -63,28 +63,19 @@ Here is the descriptions of images in the Current post.
 
 export const twitterShouldRespondTemplate = (targetUsersStr: string) =>
     `# INSTRUCTIONS: Determine if {{agentName}} (@{{twitterUserName}}) should respond to the message and participate in the conversation. Do not comment. Just respond with "true" or "false".
+
 Response options are RESPOND, IGNORE and STOP.
 
 PRIORITY RULE: ALWAYS RESPOND to these users regardless of topic or message content: ${targetUsersStr}. Topic relevance should be ignored for these users.
 
 For other users:
-- {{agentName}} should RESPOND to messages directed at them with poker-themed responses:
-  * For non-poker topics, respond with a poker meme or analogy
-  * Turn any topic into a poker reference or joke
-  * Use poker terms to roast or comment on non-poker content
-- {{agentName}} should RESPOND to any poker hand images or strategy questions seriously
-- {{agentName}} should RESPOND to bad beat stories with empathy and humor
-- {{agentName}} should RESPOND to poker tournament/cash game discussions with expertise
-- {{agentName}} should IGNORE spam or inappropriate content
+- {{agentName}} should RESPOND to messages directed at them
+- {{agentName}} should RESPOND to conversations relevant to their background
+- {{agentName}} should IGNORE irrelevant messages
 - {{agentName}} should IGNORE very short messages unless directly addressed
 - {{agentName}} should STOP if asked to stop
 - {{agentName}} should STOP if conversation is concluded
 - {{agentName}} is in a room with other users and wants to be conversational, but not annoying.
-
-EXAMPLES:
-- If someone talks about their day → "Sounds like you're running better than pocket Kings against Aces!"
-- If someone complains about work → "At least you're not grinding microstakes with 72o!"
-- Random non-poker topics → "That's as random as a 3-7 suited all-in preflop!"
 
 IMPORTANT:
 - {{agentName}} (aka @{{twitterUserName}}) is particularly sensitive about being annoying, so if there is any doubt, it is better to IGNORE than to RESPOND.
@@ -129,6 +120,12 @@ export class TwitterInteractionClient {
 
         const twitterUsername = this.client.profile.username;
         try {
+            elizaLogger.log("Searching for mentions...", {
+                query: `@${twitterUsername}`,
+                limit: 20,
+                mode: SearchMode.Latest,
+            });
+
             // Check for mentions
             const mentionCandidates = (
                 await this.client.fetchSearchTweets(
@@ -138,10 +135,15 @@ export class TwitterInteractionClient {
                 )
             ).tweets;
 
-            elizaLogger.log(
-                "Completed checking mentioned tweets:",
-                mentionCandidates.length
-            );
+            elizaLogger.log("Search results:", {
+                found: mentionCandidates.length,
+                tweets: mentionCandidates.map((t) => ({
+                    id: t.id,
+                    text: t.text,
+                    username: t.username,
+                    timestamp: t.timestamp,
+                })),
+            });
             let uniqueTweetCandidates = [...mentionCandidates];
             // Only process target users if configured
             if (this.client.twitterConfig.TWITTER_TARGET_USERS.length) {
@@ -240,6 +242,7 @@ export class TwitterInteractionClient {
 
             // for each tweet candidate, handle the tweet
             for (const tweet of uniqueTweetCandidates) {
+                elizaLogger.log("Processing tweet:", tweet.id);
                 if (
                     !this.client.lastCheckedTweetId ||
                     BigInt(tweet.id) > this.client.lastCheckedTweetId
@@ -359,7 +362,6 @@ export class TwitterInteractionClient {
 
         const imageDescriptionsArray = [];
         try {
-            elizaLogger.debug("Getting images");
             for (const photo of tweet.photos) {
                 elizaLogger.debug(photo.url);
                 const description = await this.runtime
@@ -396,7 +398,6 @@ export class TwitterInteractionClient {
             await this.runtime.messageManager.getMemoryById(tweetId);
 
         if (!tweetExists) {
-            elizaLogger.log("tweet does not exist, saving");
             const userIdUUID = stringToUuid(tweet.userId as string);
             const roomId = stringToUuid(tweet.conversationId);
 
@@ -446,21 +447,47 @@ export class TwitterInteractionClient {
             return { text: "Response Decision:", action: shouldRespond };
         }
 
-        const context = composeContext({
-            state,
-            template:
-                this.runtime.character.templates
-                    ?.twitterMessageHandlerTemplate ||
-                this.runtime.character?.templates?.messageHandlerTemplate ||
-                twitterMessageHandlerTemplate,
-        });
-        elizaLogger.debug("Interactions prompt:\n" + context);
+        // const context = composeContext({
+        //     state,
+        //     template:
+        //         this.runtime.character.templates
+        //             ?.twitterMessageHandlerTemplate ||
+        //         this.runtime.character?.templates?.messageHandlerTemplate ||
+        //         twitterMessageHandlerTemplate,
+        // });
+        elizaLogger.log(
+            "interactions.ts line 476: Generating response with context:"
+        );
 
-        const response = await generateMessageResponse({
-            runtime: this.runtime,
-            context,
-            modelClass: ModelClass.LARGE,
-        });
+        // const response = await generateMessageResponse({
+        //     runtime: this.runtime,
+        //     context,
+        //     modelClass: ModelClass.LARGE,
+        // });
+        // Use the poker analysis directly from imageDescriptionsArray
+        const response: Content = {
+            text:
+                imageDescriptionsArray.length > 0
+                    ? imageDescriptionsArray[0].description
+                    : await generateMessageResponse({
+                          runtime: this.runtime,
+                          context: composeContext({
+                              state,
+                              template: twitterMessageHandlerTemplate,
+                          }),
+                          modelClass: ModelClass.LARGE,
+                      }).then((r) => r.text),
+            action: "RESPOND",
+            inReplyTo: stringToUuid(tweet.id + "-" + this.runtime.agentId),
+            source: "twitter",
+            url: tweet.permanentUrl,
+            agentId: this.runtime.agentId,
+        };
+
+        // Ensure tweet length
+        if (response.text.length > 280) {
+            response.text = response.text.substring(0, 277) + "...";
+        }
 
         const removeQuotes = (str: string) =>
             str.replace(/^['"](.*)['"]$/, "$1");
@@ -518,7 +545,7 @@ export class TwitterInteractionClient {
                         callback
                     );
 
-                    const responseInfo = `Context:\n\n${context}\n\nSelected Post: ${tweet.id} - ${tweet.username}: ${tweet.text}\nAgent's Output:\n${response.text}`;
+                    const responseInfo = `Context:\n\n${shouldRespondContext}\n\nSelected Post: ${tweet.id} - ${tweet.username}: ${tweet.text}\nAgent's Output:\n${response.text}`;
 
                     await this.runtime.cacheManager.set(
                         `twitter/tweet_generation_${tweet.id}.txt`,

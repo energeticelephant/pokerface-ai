@@ -605,13 +605,16 @@ export class TwitterPostClient {
                 this.runtime.character.templates?.twitterPostTemplate ||
                 twitterPostTemplate,
         });
+        elizaLogger.log("post.ts line 608: context:", context);
 
         const response = await generateText({
             runtime: this.runtime,
             context: options?.context || context,
             modelClass: ModelClass.SMALL,
         });
-        elizaLogger.debug("generate tweet content response:\n" + response);
+        elizaLogger.log(
+            "post.ts line 614: generate tweet content response:\n" + response
+        );
 
         // First clean up any markdown and newlines
         const cleanedResponse = response
